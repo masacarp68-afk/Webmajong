@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>シーズン順位表</title>
+<style>
+:root{--bg:#f6f4ef;--card:#fff;--ink:#1d1d1f;--sub:#6b6b70;--line:#e4e1d8;--acc:#0f6b4f;--plus:#0f6b4f;--minus:#b3261e;--gold:#c9a227;--silver:#8e9aa6;--bronze:#a86b3c;--warn:#fff4d6}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--card:#1e1e21;--ink:#ececf0;--sub:#9a9aa3;--line:#2e2e33;--acc:#4cc59a;--plus:#4cc59a;--minus:#ff7b72;--warn:#3a3218}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif}
+.wrap{max-width:900px;margin:0 auto;padding:24px 16px 60px}
+h1{font-size:22px;margin:0 0 4px}
+.lead{color:var(--sub);font-size:13px;margin:0 0 20px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.drop{flex:1;min-width:240px;border:2px dashed var(--line);border-radius:10px;padding:18px;text-align:center;color:var(--sub);cursor:pointer;font-size:14px}
+.drop.on{border-color:var(--acc);color:var(--acc)}
+button,.btn{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:9px 14px;font-size:13px;cursor:pointer;font-family:inherit}
+button.ghost{background:transparent;color:var(--acc);border:1px solid var(--acc)}
+input[type=text]{flex:1;min-width:200px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-size:14px;font-family:inherit}
+.status{font-size:12px;color:var(--sub);margin-top:8px}
+table{width:100%;border-collapse:collapse;font-size:15px}
+th{font-size:12px;color:var(--sub);font-weight:600;text-align:left;padding:8px 6px;border-bottom:2px solid var(--line);white-space:nowrap}
+td{padding:10px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.rank{width:44px;text-align:center;font-weight:700}
+.medal{display:inline-flex;width:28px;height:28px;border-radius:50%;align-items:center;justify-content:center;color:#fff;font-size:14px}
+.r1{background:var(--gold)}.r2{background:var(--silver)}.r3{background:var(--bronze)}
+.name{font-weight:700}
+.acct{display:block;font-size:11px;color:var(--sub);font-weight:400}
+.pt{font-weight:700}
+.plus{color:var(--plus)}.minus{color:var(--minus)}
+tr.unmatched td{background:var(--warn)}
+.tag{font-size:10px;border:1px solid var(--minus);color:var(--minus);border-radius:4px;padding:1px 4px;margin-left:4px}
+.sub{color:var(--sub);font-size:13px}
+.tablewrap{overflow-x:auto}
+@media (max-width:560px){table{font-size:14px}.hide-sm{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="title">シーズン順位表</h1>
+  <p class="lead">雀魂の成績CSVを読み込むと、雀魂アカウント名を大会の登録名に置き換えて表示します（雀魂IDで照合）。</p>
+
+  <div class="panel">
+    <div class="row">
+      <label class="drop" id="drop">成績CSVをドロップ / クリックして選択
+        <input type="file" id="file" accept=".csv,text/csv" hidden>
+      </label>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <input type="text" id="titleIn" placeholder="表のタイトル（例：2026 秋シーズン）">
+      <button class="ghost" id="copyBtn">表をコピー</button>
+      <button class="ghost" id="csvBtn">CSV保存</button>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="panel" id="result" hidden>
+    <div class="tablewrap"><table>
+      <thead><tr><th class="rank">順位</th><th>登録名</th><th class="num">対局数</th><th class="num">合計pt</th><th class="num hide-sm">平均pt</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table></div>
+    <div class="status" id="unmatchedNote"></div>
+  </div>
+
+  <div class="panel">
+    <div class="row" style="justify-content:space-between">
+      <div><b>登録名リスト</b> <span class="sub" id="mapCount"></span></div>
+      <div class="row">
+        <button class="ghost" id="reloadSheet">スプシから再読込</button>
+        <label class="btn">スプシCSVを読込<input type="file" id="mapFile" accept=".csv" hidden></label>
+      </div>
+    </div>
+    <div class="status">スプシ（フォームの回答）の「登録名・雀魂ID・雀魂アカウント名」で照合します。再読込はスプシが「リンクを知っている全員が閲覧可」の場合のみ動作します。ダメなときはスプシを「ファイル→ダウンロード→CSV」して読み込んでください。</div>
+  </div>
+</div>
+
+<script>
+const SHEET_ID = '1OxYO1QXB9W_O8Khx2iseS1uAYNHhiONuYvsDl-ne8IU';
+const SHEET_GID = '170939282';
+// 初期データ（2026/10/05 時点のスプシ）: [登録名, 雀魂ID, 雀魂アカウント名]
+const DEFAULT_MAP = [
+["成海有紗","79773711","成海有紗"],["新田友一","93981709","桜祭"],["氷室哀華","110549836","氷室哀華"],["宮下達也","125105352","宮下達也"],
+["西川なな","142953032","ななnpm"],["HISA加藤","115172676","HISA加藤"],["玄田拓夢","97883656","gene831"],["金城いどむ","130677519","むーVer.2"],
+["浅井幸太郎","125713475","めぐぴーこ"],["渡辺裕也","107259393","渡辺裕也NPM"],["清水堅斗","122495233","清堅一"],["岡安世緯","79175694","片島榛名"],
+["門脇允良","84254854","のどかっぽい"],["河合風羽","110890253","ちゃんみぃたん"],["井口朗真","92827271","井口朗真"],["松島リキヤ","94457984","松島リキヤ"],
+["古畑建三郎","111227279","古畑Ken三郎"],["ポテト吉野","114117829","ポテト吉野"],["サヴェ松田","81506054","サヴェ"],["トニー田中","132944259","トニー田中"],
+["大津儀和","116284173","大津儀和"],["谷口晃一","109568398","たーにー93"],["喜屋武本詩","92587017","喜屋武本詩"],["西端勇治","134763789","にしばた"],
+["間中浩視","83642376","Kenchu_H"],["林　大貴","138022916","ぱやしneo"],["どうみき","88518529","どぅーみき"],["比嘉秀仁","142200331","比嘉秀仁"],
+["山浩","132524104","yamakou0813"],["向井勇希","93410189","えぞはむ"],["大久保光真","121784463","大久保光真"],["大群　英明","140587595","大群　英明"],
+["永野佳祐","78036163","ケッケェ"],["森田　多聞","78697093","森田　多聞"],["中村　翔太","106830346","Nak@"],["林　裕朗","138128207","ゆうろう1969"],
+["津覇佳希","95596813","ヤサカ"],["緒方　悠","143798285","緒方悠"],["荒木健介","118992442","けんすけあらき"],["山田大輔","121969679","やまだいすけ"],
+["佐藤直哉","95075892","@さとなお"],["安里瞬","97096200","アサートゥ"],["松本宗三","138944257","munezo3"],["東 悠介","108373446","東オリジナル"],
+["祖堅吾央","123210767","歯並びsilver"],["金城大河","133000460","キンタイマン"],["諸永　龍平","109466305","りうぺい"],["永森翔伍","131595140","えーさんです"],
+["大島麻美","80960264","あさみらくる"],["大坪　嵩","136326659","つぼつぼーん"],["田中　たろう","77159297","肉パンダ"],["後藤卓","80551684","後藤卓"],
+["鈴木陽路","135029632","おっプルパイ"],["羽月","81008008","たそつく。"],["矢本長司","80822404","や間もと"],["兼山英次","","メルヘン殺伐"],["音無愛音","","anonp"]
+];
+const LS_KEY = 'mjs-ranking-map-v1';
+let map = load(LS_KEY) || DEFAULT_MAP;
+let rows = [];
+
+function load(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}}
+function save(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+const $ = id => document.getElementById(id);
+const norm = s => (s||'').replace(/[\s　]/g,'').normalize('NFKC').toLowerCase();
+
+function parseCSV(text){
+  const out=[];let row=[],cur='',q=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){cur+='"';i++} else q=false } else cur+=c }
+    else if(c==='"') q=true;
+    else if(c===','){row.push(cur);cur=''}
+    else if(c==='\n'||c==='\r'){ if(c==='\r'&&text[i+1]==='\n')i++; row.push(cur);out.push(row);row=[];cur='' }
+    else cur+=c;
+  }
+  if(cur||row.length){row.push(cur);out.push(row)}
+  return out.filter(r=>r.some(v=>v.trim()!==''));
+}
+async function readText(file){
+  const buf=await file.arrayBuffer();
+  let t=new TextDecoder('utf-8').decode(buf);
+  if(t.includes('�')) t=new TextDecoder('shift_jis').decode(buf);
+  return t.replace(/^﻿/,'');
+}
+function lookup(id,acct){
+  const byId=map.find(m=>m[1]&&m[1]===id);
+  if(byId) return byId[0];
+  const n=norm(acct);
+  const byName=map.find(m=>norm(m[2])===n);
+  return byName?byName[0]:null;
+}
+function updateMapCount(){ $('mapCount').textContent=`${map.length}名登録済み`; }
+
+function setMapFromSheetRows(data){
+  const h=data[0].map(s=>s.trim());
+  const iN=h.indexOf('登録名'), iI=h.findIndex(s=>/雀魂\s*(ID|ＩＤ)/i.test(s)), iA=h.indexOf('雀魂アカウント名');
+  if(iN<0||iA<0) throw new Error('「登録名」「雀魂アカウント名」列が見つかりません');
+  map=data.slice(1).filter(r=>r[iN]).map(r=>[r[iN].trim(),iI>=0?String(r[iI]||'').normalize('NFKC').trim():'',(r[iA]||'').trim()]);
+  save(LS_KEY,map); updateMapCount(); if(rows.length) render();
+}
+
+function handleResult(text){
+  const data=parseCSV(text);
+  const h=data[0].map(s=>s.trim());
+  const col=n=>h.indexOf(n);
+  const iR=col('順位'),iI=col('プレイヤーID'),iP=col('プレイヤー名'),iG=col('対局数'),iS=col('表示得点')>=0?col('表示得点'):col('累計打点');
+  if(iP<0||iS<0) throw new Error('成績CSVの形式が違うようです（プレイヤー名/表示得点 列なし）');
+  rows=data.slice(1).map(r=>({rank:+r[iR],id:(r[iI]||'').trim(),acct:(r[iP]||'').trim(),games:+r[iG]||0,pt:parseFloat(r[iS])||0}));
+  render();
+}
+
+function render(){
+  rows.forEach(r=>r.name=lookup(r.id,r.acct));
+  const tb=$('tbody'); tb.innerHTML='';
+  rows.forEach(r=>{
+    const tr=document.createElement('tr'); if(!r.name) tr.className='unmatched';
+    const medal=r.rank<=3?`<span class="medal r${r.rank}">${r.rank}</span>`:r.rank;
+    const cls=r.pt>0?'plus':r.pt<0?'minus':'';
+    const avg=r.games?(r.pt/r.games):0;
+    const nameHtml=r.name
+      ?`<span class="name">${esc(r.name)}</span>${norm(r.name)!==norm(r.acct)?`<span class="acct">${esc(r.acct)}</span>`:''}`
+      :`<span class="name">${esc(r.acct)}</span><span class="tag">未登録</span>`;
+    tr.innerHTML=`<td class="rank">${medal}</td><td>${nameHtml}</td><td class="num">${r.games}</td><td class="num pt ${cls}">${fmt(r.pt)}</td><td class="num hide-sm ${cls}">${fmt(avg)}</td>`;
+    tb.appendChild(tr);
+  });
+  const un=rows.filter(r=>!r.name);
+  $('unmatchedNote').textContent=un.length?`※ 未登録 ${un.length}名（雀魂名のまま表示）：${un.map(r=>`${r.acct}(ID:${r.id})`).join('、')}`:'全員照合できました。';
+  $('result').hidden=false;
+}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt=v=>(v>0?'+':'')+v.toFixed(1);
+const display=r=>r.name||r.acct;
+
+async function onResultFile(f){
+  try{ handleResult(await readText(f)); $('status').textContent=`読込：${f.name}（${rows.length}名）`; }
+  catch(e){ $('status').textContent='エラー：'+e.message; }
+}
+$('file').addEventListener('change',e=>e.target.files[0]&&onResultFile(e.target.files[0]));
+const drop=$('drop');
+['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('on')}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('on')}));
+drop.addEventListener('drop',e=>e.dataTransfer.files[0]&&onResultFile(e.dataTransfer.files[0]));
+
+$('titleIn').addEventListener('input',e=>{$('title').textContent=e.target.value||'シーズン順位表';save('mjs-ranking-title',e.target.value)});
+const t=load('mjs-ranking-title'); if(t){$('titleIn').value=t;$('title').textContent=t}
+
+$('copyBtn').onclick=async()=>{
+  if(!rows.length) return;
+  const txt=['順位\t登録名\t対局数\t合計pt\t平均pt',...rows.map(r=>[r.rank,display(r),r.games,r.pt.toFixed(1),(r.games?r.pt/r.games:0).toFixed(1)].join('\t'))].join('\n');
+  try{await navigator.clipboard.writeText(txt);$('status').textContent='コピーしました（スプシ・Excelに貼り付け可）'}catch(e){$('status').textContent='コピー失敗'}
+};
+$('csvBtn').onclick=()=>{
+  if(!rows.length) return;
+  const csv='﻿'+['順位,登録名,雀魂アカウント名,対局数,合計pt,平均pt',...rows.map(r=>[r.rank,`"${display(r)}"`,`"${r.acct}"`,r.games,r.pt.toFixed(1),(r.games?r.pt/r.games:0).toFixed(1)].join(','))].join('\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='順位表_登録名.csv';a.click();
+};
+$('reloadSheet').onclick=async()=>{
+  $('status').textContent='スプシ読込中…';
+  try{
+    const r=await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}`);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    setMapFromSheetRows(parseCSV(await r.text()));
+    $('status').textContent=`スプシから ${map.length}名 読み込みました`;
+  }catch(e){ $('status').textContent='スプシを読めませんでした（非公開の可能性）。CSVダウンロード→「スプシCSVを読込」を使ってください'; }
+};
+$('mapFile').addEventListener('change',async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  try{ setMapFromSheetRows(parseCSV(await readText(f))); $('status').textContent=`登録名リスト更新：${map.length}名`; }
+  catch(err){ $('status').textContent='エラー：'+err.message; }
+});
+updateMapCount();
+</script>
+</body>
+</html>
