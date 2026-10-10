@@ -75,7 +75,7 @@ tr.unmatched td{background:var(--warn)}
       <span class="sub" id="rangeInfo"></span>
     </div>
     <div class="tablewrap"><table>
-      <thead><tr><th class="rank">順位</th><th>登録名</th><th class="num">対局数</th><th class="num">合計pt</th><th class="num hide-sm">平均pt</th></tr></thead>
+      <thead><tr><th class="rank">順位</th><th>登録名</th><th class="num hide-sm" id="placesTh" hidden>着順<br><span style="font-weight:400">1-2-3-4</span></th><th class="num">対局数</th><th class="num">合計pt</th><th class="num hide-sm">平均pt</th></tr></thead>
       <tbody id="tbody"></tbody>
     </table></div>
     <div class="status" id="unmatchedNote"></div>
@@ -116,6 +116,7 @@ const DEFAULT_MAP = [
 const LS_KEY = 'mjs-ranking-map-v1';
 let map = load(LS_KEY) || DEFAULT_MAP;
 let rows = [];
+let hasPlaces = false;
 
 function load(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}}
 function save(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
@@ -161,15 +162,19 @@ function setMapFromSheetRows(data){
 function handleResult(text){
   const data=parseCSV(text);
   const h=data[0].map(s=>s.trim());
-  const col=n=>h.indexOf(n);
-  const iR=col('順位'),iI=col('プレイヤーID'),iP=col('プレイヤー名'),iG=col('対局数'),iS=col('表示得点')>=0?col('表示得点'):col('累計打点');
-  if(iP<0||iS<0) throw new Error('成績CSVの形式が違うようです（プレイヤー名/表示得点 列なし）');
-  rows=data.slice(1).map(r=>({rank:+r[iR],id:(r[iI]||'').trim(),acct:(r[iP]||'').trim(),games:+r[iG]||0,pt:parseFloat(r[iS])||0}));
+  const col=(...ns)=>{for(const n of ns){const i=h.indexOf(n);if(i>=0)return i}return -1};
+  const iR=col('順位'),iI=col('プレイヤーID'),iP=col('プレイヤー名'),iG=col('対局数','対戦数'),iS=col('表示得点','点数','累計打点');
+  const iPl=[1,2,3,4].map(n=>col(`${n}位獲得回数`));
+  if(iP<0||iS<0) throw new Error('成績CSVの形式が違うようです（プレイヤー名/得点 列なし）');
+  hasPlaces=iPl.every(i=>i>=0);
+  rows=data.slice(1).map(r=>({rank:+r[iR],id:(r[iI]||'').trim(),acct:(r[iP]||'').trim(),games:+r[iG]||0,pt:parseFloat(r[iS])||0,
+    places:hasPlaces?iPl.map(i=>+r[i]||0):null}));
   render();
 }
 
 function render(){
   rows.forEach(r=>r.name=lookup(r.id,r.acct));
+  $('placesTh').hidden=!hasPlaces;
   const tb=$('tbody'); tb.innerHTML='';
   rows.forEach(r=>{
     const tr=document.createElement('tr'); if(!r.name) tr.className='unmatched';
@@ -179,7 +184,7 @@ function render(){
     const nameHtml=r.name
       ?`<span class="name">${esc(r.name)}</span>${norm(r.name)!==norm(r.acct)?`<span class="acct">${esc(r.acct)}</span>`:''}`
       :`<span class="name">${esc(r.acct)}</span><span class="tag">未登録</span>`;
-    tr.innerHTML=`<td class="rank">${medal}</td><td>${nameHtml}</td><td class="num">${r.games}</td><td class="num pt ${cls}">${fmt(r.pt)}</td><td class="num hide-sm ${cls}">${fmt(avg)}</td>`;
+    tr.innerHTML=`<td class="rank">${medal}</td><td>${nameHtml}</td>${hasPlaces?`<td class="num hide-sm sub">${r.places.join('-')}</td>`:''}<td class="num">${r.games}</td><td class="num pt ${cls}">${fmt(r.pt)}</td><td class="num hide-sm ${cls}">${fmt(avg)}</td>`;
     tb.appendChild(tr);
   });
   const un=rows.filter(r=>!r.name);
@@ -205,12 +210,13 @@ const t=load('mjs-ranking-title'); if(t){$('titleIn').value=t;$('title').textCon
 
 $('copyBtn').onclick=async()=>{
   if(!rows.length) return;
-  const txt=['順位\t登録名\t対局数\t合計pt\t平均pt',...rows.map(r=>[r.rank,display(r),r.games,r.pt.toFixed(1),(r.games?r.pt/r.games:0).toFixed(1)].join('\t'))].join('\n');
+  const pl=hasPlaces?['1位','2位','3位','4位']:[];
+  const txt=[['順位','登録名','対局数','合計pt','平均pt',...pl].join('\t'),...rows.map(r=>[r.rank,display(r),r.games,r.pt.toFixed(1),(r.games?r.pt/r.games:0).toFixed(1),...(r.places||[])].join('\t'))].join('\n');
   try{await navigator.clipboard.writeText(txt);$('status').textContent='コピーしました（スプシ・Excelに貼り付け可）'}catch(e){$('status').textContent='コピー失敗'}
 };
 $('csvBtn').onclick=()=>{
   if(!rows.length) return;
-  const csv='﻿'+['順位,登録名,雀魂アカウント名,対局数,合計pt,平均pt',...rows.map(r=>[r.rank,`"${display(r)}"`,`"${r.acct}"`,r.games,r.pt.toFixed(1),(r.games?r.pt/r.games:0).toFixed(1)].join(','))].join('\n');
+  const csv='﻿'+['順位,登録名,雀魂アカウント名,対局数,合計pt,平均pt'+(hasPlaces?',1位,2位,3位,4位':''),...rows.map(r=>[r.rank,`"${display(r)}"`,`"${r.acct}"`,r.games,r.pt.toFixed(1),(r.games?r.pt/r.games:0).toFixed(1),...(r.places||[])].join(','))].join('\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='順位表_登録名.csv';a.click();
 };
 $('reloadSheet').onclick=async()=>{
@@ -253,7 +259,7 @@ $('rangeMode').addEventListener('change',renderRangeInputs);
 const _render=render; render=function(){_render();markRange()};
 
 function drawImage(list){
-  const S=2, W=760, PAD=32, HEAD=110, TH=36, RH=52, FOOT=36;
+  const S=2, W=hasPlaces?860:760, PAD=32, HEAD=110, TH=36, RH=52, FOOT=36;
   const H=HEAD+TH+RH*list.length+FOOT;
   const c=document.createElement('canvas'); c.width=W*S; c.height=H*S;
   const g=c.getContext('2d'); g.scale(S,S);
@@ -265,12 +271,13 @@ function drawImage(list){
   const m=$('rangeMode'); g.fillStyle='#6b6b70'; g.font=`13px ${F}`;
   const lbl=m.value==='all'?'':m.value==='top'?`上位${$('rN').value}位`:m.value==='range'?`${$('rFrom').value}〜${$('rTo').value}位`:m.options[m.selectedIndex].text;
   g.fillText([lbl,`${list.length}名`].filter(Boolean).join(' ・ '),PAD,86);
-  const X={rank:PAD+22,name:PAD+60,games:W-PAD-230,pt:W-PAD-110,avg:W-PAD};
+  const X={rank:PAD+22,name:PAD+60,games:W-PAD-230,pt:W-PAD-110,avg:W-PAD,places:W-PAD-300};
   let y=HEAD;
   g.fillStyle='#fff'; g.fillRect(PAD-12,y,W-2*PAD+24,TH+RH*list.length);
   g.fillStyle='#6b6b70'; g.font=`600 12px ${F}`;
   g.textAlign='center'; g.fillText('順位',X.rank,y+TH/2);
   g.textAlign='left'; g.fillText('登録名',X.name,y+TH/2);
+  if(hasPlaces) g.fillText('着順（1-2-3-4）',X.places-110,y+TH/2);
   g.textAlign='right'; g.fillText('対局数',X.games,y+TH/2); g.fillText('合計pt',X.pt,y+TH/2); g.fillText('平均pt',X.avg,y+TH/2);
   y+=TH;
   const medal={1:'#c9a227',2:'#8e9aa6',3:'#a86b3c'};
@@ -281,8 +288,9 @@ function drawImage(list){
     if(medal[r.rank]){g.fillStyle=medal[r.rank];g.beginPath();g.arc(X.rank,cy,15,0,Math.PI*2);g.fill();g.fillStyle='#fff'}else g.fillStyle='#1d1d1f';
     g.font=`700 15px ${F}`; g.fillText(r.rank,X.rank,cy);
     g.textAlign='left'; g.fillStyle='#1d1d1f'; g.font=`700 17px ${F}`;
-    g.fillText(display(r),X.name,cy,X.games-X.name-70);
-    g.textAlign='right'; g.font=`15px ${F}`; g.fillText(r.games,X.games,cy);
+    g.fillText(display(r),X.name,cy,(hasPlaces?X.places-120:X.games-70)-X.name);
+    g.textAlign='right'; g.font=`15px ${F}`;
+    if(r.places){g.fillStyle='#6b6b70';g.font=`14px ${F}`;g.fillText(r.places.join('-'),X.places,cy);g.fillStyle='#1d1d1f';g.font=`15px ${F}`} g.fillText(r.games,X.games,cy);
     g.fillStyle=col; g.font=`700 18px ${F}`; g.fillText(fmt(r.pt),X.pt,cy);
     g.font=`14px ${F}`; g.fillText(fmt(r.games?r.pt/r.games:0),X.avg,cy);
     y+=RH;
